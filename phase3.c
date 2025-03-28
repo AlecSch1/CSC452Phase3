@@ -3,11 +3,11 @@
 #include <phase2.h>
 #include <phase1.h>
 #include <stdlib.h>
+#include <phase3_usermode.h>
 
 int printDebug = 0;
 
 typedef struct fakePCB {
-    int pid;
     int (*func)(void *);
     void *param;
 } process;
@@ -64,13 +64,17 @@ static void checkArgs(USLOSS_Sysargs *args){
     }
 }
 
-static void trampoline(){
+void trampoline(int mID){
+    if(printDebug == 1){
+        USLOSS_Console("trampoline called\n");
+    }
+    process newProcess;
+    MboxCondRecv(mID, &newProcess, sizeof(process));
+    MboxRelease(mID);
     //Setting user mode
     unsigned int psr = USLOSS_PsrGet();
     USLOSS_PsrSet(psr & ~USLOSS_PSR_CURRENT_MODE);
-
-
-
+    Terminate(newProcess.func(newProcess.param));
     //Restoring Previous PSR
     USLOSS_PsrSet(psr);
 }
@@ -82,7 +86,12 @@ static void spawnHandler(USLOSS_Sysargs *args){
     enforceKernelMode("SpawnHandler");
     checkArgs(&args);
     printArgs(args);
-    int retval = spork((char *) args->arg5, (int (*)(void *)) args->arg1, args->arg2, 
+    process spawned;
+    spawned.func = args->arg1;
+    spawned.param = args->arg2;
+    int * mboxID = MboxCreate(1, sizeof(process));
+    MboxCondSend(mboxID, &spawned, sizeof(process));
+    int retval = spork((char *) args->arg5, trampoline, mboxID, 
         (int) args->arg3, (int)args->arg4);
     if(retval == -1){
         args->arg4 = (void *) -1;
@@ -221,7 +230,7 @@ void intHandlerSyscall(int type, void *arg)
     }
 
     // call the system call
-    systemCallVec[syscallNum](args); // note: in phase2, these are all nullsys
+    systemCallVec[syscallNum](args);
 }
 
 //For any syscall num we aren't supposed to implement
