@@ -1,9 +1,12 @@
+//Phase3.c code by Alec Schmitt and Luckie Musngi
+
 #include <phase3.h>
 #include <usloss.h>
 #include <phase2.h>
 #include <phase1.h>
 #include <stdlib.h>
 #include <phase3_usermode.h>
+#include <phase3_kernelInterfaces.h>
 
 int printDebug = 0;
 
@@ -13,6 +16,15 @@ typedef struct fakePCB {
 } process;
 
 process shadowTable[MAXPROC];
+
+typedef struct semaphore{
+    int value;
+    int mbox;
+} sem;
+
+int nextSem;
+//int totalSem;
+sem semTable[MAXSEMS];
 
 static void printArgs(USLOSS_Sysargs * args){
     if(printDebug != 1){
@@ -62,6 +74,56 @@ static void checkArgs(USLOSS_Sysargs *args){
         USLOSS_Console("Args Struct Null\n");
         USLOSS_Halt(1);
     }
+}
+
+int kernSemCreate(int value, int *semaphore){
+    enforceKernelMode("KernSemCreate");
+    if(nextSem == MAXSEMS || value < 0 || &semaphore == NULL){
+        return -1;
+    }
+    semTable[nextSem].value = value;
+    semTable[nextSem].mbox = -1;
+    *semaphore = nextSem++;
+    return 0;
+}
+
+int kernSemP(int semaphore){
+    enforceKernelMode("KernSemP");
+    if(semaphore < 0 || semaphore > MAXSEMS || semTable[semaphore].value == -1){
+        return -1;
+    }
+    if(semTable[semaphore].value == 0){
+        if(semTable[semaphore].mbox == -1){
+            semTable[semaphore].mbox = MboxCreate(MAXSLOTS, 0);
+        }
+        if(printDebug == 1){
+            USLOSS_Console("KernSemP %d Blocking at Mailbox %d\n", semaphore, semTable[semaphore].mbox);
+        }
+        MboxRecv(semTable[semaphore].mbox, NULL, 0);
+    }
+    semTable[semaphore].value--;
+    return 0;
+}
+
+int kernSemV(int semaphore){
+    enforceKernelMode("KernSemV");
+    if(semaphore < 0 || semaphore > MAXSEMS || semTable[semaphore].value == -1){
+        return -1;
+    }
+    semTable[semaphore].value++;
+    if(semTable[semaphore].mbox != -1){
+        if(printDebug == 1){
+            USLOSS_Console("KernSemV %d Sending to Mailbox %d\n", semaphore, semTable[semaphore].mbox);
+        }
+        int retval = MboxCondSend(semTable[semaphore].mbox, NULL, 0);
+        if(printDebug == 1){
+            USLOSS_Console("CondSend Retval: %d\n", retval);
+        }
+        // if(semTable[semaphore].value == 1){
+        //     MboxSend(semTable[semaphore].mbox, NULL, 0);
+        // }
+    }
+    return 0;
 }
 
 void trampoline(int mID){
@@ -150,8 +212,13 @@ static void semCreateHandler(USLOSS_Sysargs *args){
     }
     enforceKernelMode("SemCreateHandler");
     checkArgs(&args);
-    USLOSS_Console("I HAVEN'T DONE SEMCREATE YET\n");
-    USLOSS_Halt(1);
+    printArgs(&args);
+    //int id;
+    args->arg4 = kernSemCreate(args->arg1, &args->arg1);
+    // if(args->arg4 == 0){
+    //     args->arg1 = id;
+    // }
+    printArgs(&args);
 }
 
 static void semPHandler(USLOSS_Sysargs *args){
@@ -160,8 +227,10 @@ static void semPHandler(USLOSS_Sysargs *args){
     }
     enforceKernelMode("semPHandler");
     checkArgs(&args);
-    USLOSS_Console("I HAVEN'T DONE SEMP YET\n");
-    USLOSS_Halt(1);
+    args->arg4 = kernSemP(args->arg1);
+    if(printDebug == 1){
+        USLOSS_Console("SemP Handler Done\n");
+    }
 }
 
 static void semVHandler(USLOSS_Sysargs *args){
@@ -170,8 +239,10 @@ static void semVHandler(USLOSS_Sysargs *args){
     }
     enforceKernelMode("SemV Handler\n");
     checkArgs(&args);
-    USLOSS_Console("I HAVEN'T DONE SEMV YET\n");
-    USLOSS_Halt(1);
+    args->arg4 = kernSemV(args->arg1);
+    if(printDebug == 1){
+        USLOSS_Console("SemV Handler Done\n");
+    }
 }
 
 //I don't think this is needed
@@ -239,6 +310,12 @@ static void badCallHandler(USLOSS_Sysargs *args){
 }
 
 void phase3_init(){
+    for(int i = 0; i < MAXSEMS; i++){
+        semTable[i].mbox = -1;
+        semTable[i].value = -1;
+    }
+    nextSem = 0;
+    //totalSem = 0;
     for (int i = 0; i < USLOSS_MAX_SYSCALLS; i++)
     { 
         systemCallVec[i] = badCallHandler;
