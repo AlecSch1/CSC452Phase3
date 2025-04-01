@@ -10,22 +10,26 @@
 
 int printDebug = 0;
 
+//A struct just containing a function's pointer and params
 typedef struct fakePCB {
     int (*func)(void *);
     void *param;
 } process;
 
-process shadowTable[MAXPROC];
+p//rocess shadowTable[MAXPROC];
 
+//Semaphore struct with its value and the mailbox used for blocking
 typedef struct semaphore{
     int value;
     int mbox;
 } sem;
 
+
 int nextSem;
-//int totalSem;
+//Array allocated for all semaphore structs
 sem semTable[MAXSEMS];
 
+//Called by most functions, prints out values of arg struct either as ints or pointers
 static void printArgs(USLOSS_Sysargs * args){
     if(printDebug != 1){
         return;
@@ -56,9 +60,9 @@ static void printArgs(USLOSS_Sysargs * args){
     }
 }
 
-// this one is used as a helper, as it is called in psrEnable and psrDisable
 // * makes sure that the current mode is in kernel mode
-// Taken from Phase1
+// Halts program and returns error if not in kernel mode
+// Taken from our Phase1 code
 void enforceKernelMode(char *caller)
 {
     if ((USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE) == 0)
@@ -69,6 +73,7 @@ void enforceKernelMode(char *caller)
     }
 }
 
+//Makes sure pointer to args struct is not NULL
 static void checkArgs(USLOSS_Sysargs *args){
     if(args == NULL){
         USLOSS_Console("Args Struct Null\n");
@@ -76,6 +81,8 @@ static void checkArgs(USLOSS_Sysargs *args){
     }
 }
 
+//Creates a semaphore on the kernel level
+//Returns 0 if successful, -1 if invalid args or no more room for new semaphores
 int kernSemCreate(int value, int *semaphore){
     enforceKernelMode("KernSemCreate");
     if(nextSem == MAXSEMS || value < 0 || &semaphore == NULL){
@@ -87,6 +94,9 @@ int kernSemCreate(int value, int *semaphore){
     return 0;
 }
 
+//Decrements a semaphore, or if semaphore value is 0 blocks using mailbox until 
+//semaphore is incremented
+//Returns 0 if successful, -1 if invalid values
 int kernSemP(int semaphore){
     enforceKernelMode("KernSemP");
     if(semaphore < 0 || semaphore > MAXSEMS || semTable[semaphore].value == -1){
@@ -105,6 +115,8 @@ int kernSemP(int semaphore){
     return 0;
 }
 
+//Increments a semaphore value on the kernel level, returns -1 if invalid values and
+//0 if successful. Performs conditional send to wake up any blocked kernSemP functions
 int kernSemV(int semaphore){
     enforceKernelMode("KernSemV");
     if(semaphore < 0 || semaphore > MAXSEMS || semTable[semaphore].value == -1){
@@ -126,12 +138,17 @@ int kernSemV(int semaphore){
     return 0;
 }
 
+//Trampoline for spawn kernel function, reads in a struct from a mailbox,
+//switches to user mode and calls the function in the struct
 void trampoline(int mID){
     if(printDebug == 1){
         USLOSS_Console("trampoline called\n");
     }
     process newProcess;
-    MboxCondRecv(mID, &newProcess, sizeof(process));
+    if(MboxCondRecv(mID, &newProcess, sizeof(process)) == -2){
+        USLOSS_Console("Trampoline not given function to call\n");
+        return;
+    }
     MboxRelease(mID);
     //Setting user mode
     unsigned int psr = USLOSS_PsrGet();
@@ -141,6 +158,9 @@ void trampoline(int mID){
     USLOSS_PsrSet(psr);
 }
 
+//Sporks the trampoline function with its arg parameter as the mbox
+//to read in the function pointer.
+//Returns 0 on arg4 if spork works and -1 otherwise
 static void spawnHandler(USLOSS_Sysargs *args){
     if(printDebug == 1){
         USLOSS_Console("Spawn Handler\n");
