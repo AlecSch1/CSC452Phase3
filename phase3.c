@@ -184,6 +184,9 @@ static void spawnHandler(USLOSS_Sysargs *args){
     printArgs(args);
 }
 
+//Syscall handler for wait, calls kernel function join
+//Returns -2 on arg4 if unsuccessful, otherwise returns the pid
+//returned by join on arg1, the status on arg2, and 0 on arg4
 static void waitHandler(USLOSS_Sysargs *args){
     if(printDebug == 1){
         USLOSS_Console("Wait Handler\n");
@@ -208,6 +211,8 @@ static void waitHandler(USLOSS_Sysargs *args){
     printArgs(args);
 }
 
+//Syscall handler for Terminate, calls join in a loop until it returns -2,
+//then calls quit. Returns nothing
 static void terminateHandler(USLOSS_Sysargs *args){
     if(printDebug == 1){
         USLOSS_Console("Terminate Handler\n");
@@ -225,6 +230,7 @@ static void terminateHandler(USLOSS_Sysargs *args){
     quit((int) args->arg1);
     printArgs(args);
 }
+
 
 static void semCreateHandler(USLOSS_Sysargs *args){
     if(printDebug == 1){
